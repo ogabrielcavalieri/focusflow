@@ -1,147 +1,236 @@
-import { PowerUI } from 'powerui';
-import { StorageManager } from '../utils/storage.js';
-import { FocusAnalytics } from '../utils/analytics.js';
+// Dimensões do Amazfit Bip 6 (tela 1.91", ~192x490)
+const SCREEN_W = 192;
+const SCREEN_H = 490;
+
+// Paleta de cores
+const COLOR_BG      = 0x000000;
+const COLOR_ACCENT  = 0x00FF88;
+const COLOR_WHITE   = 0xFFFFFF;
+const COLOR_GRAY    = 0x888888;
+const COLOR_BTN     = 0x007AFF;
+const COLOR_BTN_PR  = 0x005EC0;
+const COLOR_SUCCESS = 0xFFD700;
 
 Page({
-  state: {
-    time: '00:00',
-    isRunning: false,
-    recommendedDuration: 900, // 15min default
-    stats: { successRate: 0, streak: 0, avgDuration: 0 },
-    session: null
-  },
+  // Referências aos widgets
+  _timerText:  null,
+  _statusText: null,
+  _goalText:   null,
+  _statsText:  null,
+  _startBtn:   null,
 
-  storage: null,
-  analytics: null,
+  // Estado da sessão
+  _isRunning:     false,
+  _startTime:     0,
+  _targetMs:      900000, // 15min padrão
+  _sessionDone:   false,
+  _interval:      null,
 
-  async onInit() {
-    this.storage = App.getApp().globalData.storage;
-    this.analytics = new FocusAnalytics(this.storage);
-    
-    await this.loadStats();
-    this.state.recommendedDuration = this.analytics.recommendSessionDuration();
-    
-    this.buildUI();
-    this.updateDisplay();
-  },
+  build() {
+    this._calcRecommendation();
 
-  async loadStats() {
-    this.state.stats = this.storage.getStats();
-    this.$page.setState({ stats: this.state.stats });
-  },
-
-  buildUI() {
-    PowerUI.render(`
-      <div class="focus-container">
-        <div class="header">
-          <text class="title">🎯 FocusFlow</text>
-          <text class="streak">🔥 {{stats.streak}} dias</text>
-        </div>
-
-        <div class="timer-section">
-          <text id="timer" class="timer">{{time}}</text>
-          <text class="recommended">Recomendado: {{formatDuration(recommendedDuration)}}</text>
-        </div>
-
-        <div class="controls">
-          <rect id="start-btn" class="btn primary" onclick="startFocus">
-            {{isRunning ? '⏸️ PAUSAR' : '▶️ INICIAR'}}
-          </rect>
-          <rect id="stats-btn" class="btn secondary" onclick="showStats">
-            📊
-          </rect>
-        </div>
-
-        <div class="stats-mini">
-          <text>✅ {{stats.successRate}}% sucesso</text>
-        </div>
-      </div>
-    `);
-  },
-
-  // 🔄 CONTROLES PRINCIPAIS
-  async startFocus() {
-    if (this.state.isRunning) {
-      this.pauseSession();
-    } else {
-      this.startSession();
-    }
-  },
-
-  startSession() {
-    this.state.session = {
-      startTime: Date.now(),
-      targetDuration: this.state.recommendedDuration * 1000,
-      completed: false
-    };
-
-    this.state.isRunning = true;
-    this.interval = setInterval(() => this.tick(), 1000);
-    
-    this.$page.setState({ 
-      isRunning: true,
-      time: this.formatTime(0)
+    // Título
+    hmUI.createWidget(hmUI.widget.TEXT, {
+      x: 0, y: 12, w: SCREEN_W, h: 28,
+      text: 'FocusFlow',
+      color: COLOR_ACCENT,
+      text_size: 20,
+      align_h: hmUI.align.CENTER_H,
+      align_v: hmUI.align.CENTER_V,
     });
-  },
 
-  pauseSession() {
-    if (this.state.session) {
-      this.state.session.duration = Date.now() - this.state.session.startTime;
-      this.state.session.completed = this.state.session.duration >= this.state.session.targetDuration * 0.9;
-      this.storage.saveSession(this.state.session);
-    }
-
-    clearInterval(this.interval);
-    this.state.isRunning = false;
-    
-    this.loadStats(); // Atualiza streak/sucesso
-    this.$page.setState({ isRunning: false });
-  },
-
-  tick() {
-    if (!this.state.session) return;
-    
-    const elapsed = Date.now() - this.state.session.startTime;
-    const timeStr = this.formatTime(elapsed);
-    
-    this.$page.setState({ time: timeStr });
-
-    // Vibração no alvo
-    if (elapsed >= this.state.session.targetDuration && !this.state.session.completed) {
-      hmDevice.vibrate([100, 200, 100]);
-      this.state.session.completed = true;
-    }
-  },
-
-  // 📊 UTILITÁRIOS
-  formatTime(ms) {
-    const totalSec = Math.floor(ms / 1000);
-    const mins = Math.floor(totalSec / 60).toString().padStart(2, '0');
-    const secs = (totalSec % 60).toString().padStart(2, '0');
-    return `${mins}:${secs}`;
-  },
-
-  formatDuration(ms) {
-    const mins = Math.floor(ms / 1000 / 60);
-    return `${mins}min`;
-  },
-
-  showStats() {
-    // Mostra stats detalhados (modal simples)
-    console.log('📊 Stats:', this.state.stats);
-    hmUI.showToast({
-      msg: `✅ ${this.state.stats.successRate}% | 🔥 ${this.state.stats.streak} dias`
+    // Linha separadora
+    hmUI.createWidget(hmUI.widget.FILL_RECT, {
+      x: 24, y: 44, w: SCREEN_W - 48, h: 1,
+      color: 0x333333,
     });
-  },
 
-  // 🔋 OTIMIZAÇÕES
-  onHide() {
-    if (this.state.isRunning) {
-      this.pauseSession();
-    }
+    // Timer principal
+    this._timerText = hmUI.createWidget(hmUI.widget.TEXT, {
+      x: 0, y: 70, w: SCREEN_W, h: 70,
+      text: '00:00',
+      color: COLOR_WHITE,
+      text_size: 52,
+      align_h: hmUI.align.CENTER_H,
+      align_v: hmUI.align.CENTER_V,
+    });
+
+    // Meta de duração
+    this._goalText = hmUI.createWidget(hmUI.widget.TEXT, {
+      x: 0, y: 148, w: SCREEN_W, h: 22,
+      text: 'Meta: ' + this._fmtDuration(this._targetMs),
+      color: COLOR_GRAY,
+      text_size: 13,
+      align_h: hmUI.align.CENTER_H,
+      align_v: hmUI.align.CENTER_V,
+    });
+
+    // Status da sessão
+    this._statusText = hmUI.createWidget(hmUI.widget.TEXT, {
+      x: 0, y: 174, w: SCREEN_W, h: 20,
+      text: 'Pronto para focar',
+      color: COLOR_GRAY,
+      text_size: 12,
+      align_h: hmUI.align.CENTER_H,
+      align_v: hmUI.align.CENTER_V,
+    });
+
+    // Botão iniciar/parar
+    this._startBtn = hmUI.createWidget(hmUI.widget.BUTTON, {
+      x: 36, y: 206, w: 120, h: 48,
+      text: 'INICIAR',
+      text_size: 16,
+      normal_color: COLOR_BTN,
+      press_color: COLOR_BTN_PR,
+      radius: 24,
+      click_func: () => this._toggleSession(),
+    });
+
+    // Linha separadora inferior
+    hmUI.createWidget(hmUI.widget.FILL_RECT, {
+      x: 24, y: 268, w: SCREEN_W - 48, h: 1,
+      color: 0x333333,
+    });
+
+    // Stats resumidas
+    this._statsText = hmUI.createWidget(hmUI.widget.TEXT, {
+      x: 0, y: 276, w: SCREEN_W, h: 20,
+      text: this._buildStatsLabel(),
+      color: COLOR_GRAY,
+      text_size: 12,
+      align_h: hmUI.align.CENTER_H,
+      align_v: hmUI.align.CENTER_V,
+    });
   },
 
   onDestroy() {
-    if (this.interval) clearInterval(this.interval);
-  }
+    if (this._interval) clearInterval(this._interval);
+  },
+
+  // ─── Sessão ────────────────────────────────────────────────
+
+  _toggleSession() {
+    if (this._isRunning) {
+      this._stopSession();
+    } else {
+      this._startSession();
+    }
+  },
+
+  _startSession() {
+    this._isRunning   = true;
+    this._startTime   = Date.now();
+    this._sessionDone = false;
+
+    hmUI.setProperty(this._startBtn,   hmUI.prop.TEXT,  'PARAR');
+    hmUI.setProperty(this._statusText, hmUI.prop.TEXT,  'Focando...');
+    hmUI.setProperty(this._timerText,  hmUI.prop.COLOR, COLOR_WHITE);
+
+    this._interval = setInterval(() => this._tick(), 1000);
+  },
+
+  _stopSession() {
+    clearInterval(this._interval);
+    this._interval  = null;
+    this._isRunning = false;
+
+    const duration  = Date.now() - this._startTime;
+    const completed = this._sessionDone || duration >= this._targetMs * 0.9;
+
+    this._persistSession({
+      startTime: this._startTime,
+      duration:  duration,
+      targetMs:  this._targetMs,
+      completed: completed,
+    });
+
+    hmUI.setProperty(this._startBtn,   hmUI.prop.TEXT,  'INICIAR');
+    hmUI.setProperty(this._timerText,  hmUI.prop.TEXT,  '00:00');
+    hmUI.setProperty(this._timerText,  hmUI.prop.COLOR, COLOR_WHITE);
+    hmUI.setProperty(this._statusText, hmUI.prop.TEXT,  completed ? 'Sessao concluida!' : 'Sessao encerrada');
+    hmUI.setProperty(this._statsText,  hmUI.prop.TEXT,  this._buildStatsLabel());
+
+    this._calcRecommendation();
+    hmUI.setProperty(this._goalText, hmUI.prop.TEXT, 'Meta: ' + this._fmtDuration(this._targetMs));
+  },
+
+  _tick() {
+    const elapsed = Date.now() - this._startTime;
+    hmUI.setProperty(this._timerText, hmUI.prop.TEXT, this._fmtTime(elapsed));
+
+    // Alerta ao atingir meta
+    if (elapsed >= this._targetMs && !this._sessionDone) {
+      this._sessionDone = true;
+      hmVibrate.triggerBig();
+      hmUI.setProperty(this._timerText,  hmUI.prop.COLOR, COLOR_SUCCESS);
+      hmUI.setProperty(this._statusText, hmUI.prop.TEXT,  'Meta atingida!');
+    }
+  },
+
+  // ─── Persistência ──────────────────────────────────────────
+
+  _persistSession(session) {
+    const app = getApp();
+    app.globalData.sessions.unshift(session);
+    if (app.globalData.sessions.length > 100) {
+      app.globalData.sessions.length = 100;
+    }
+
+    try {
+      const json = JSON.stringify(app.globalData.sessions);
+      const buf  = new Uint8Array(json.length);
+      for (let i = 0; i < json.length; i++) buf[i] = json.charCodeAt(i) & 0xFF;
+
+      const fd = hmFS.open('focusflow.json', hmFS.O_WRONLY | hmFS.O_CREAT | hmFS.O_TRUNC);
+      hmFS.write(fd, buf.buffer, 0, buf.length);
+      hmFS.close(fd);
+    } catch (e) {
+      console.log('[FocusFlow] Erro ao salvar:', e);
+    }
+  },
+
+  // ─── Analytics inline ──────────────────────────────────────
+
+  _calcRecommendation() {
+    const { successRate } = this._calcStats();
+    if (successRate < 40)      this._targetMs = 300000;  // 5min
+    else if (successRate < 70) this._targetMs = 900000;  // 15min
+    else                       this._targetMs = 1800000; // 30min
+  },
+
+  _calcStats() {
+    const sessions = getApp().globalData.sessions;
+    if (!sessions || !sessions.length) return { successRate: 0, streak: 0, total: 0 };
+
+    const done = sessions.filter(s => s.completed).length;
+    let streak = 0;
+    for (const s of sessions) {
+      if (s.completed) streak++;
+      else break;
+    }
+
+    return {
+      total:       sessions.length,
+      successRate: Math.round((done / sessions.length) * 100),
+      streak:      streak,
+    };
+  },
+
+  _buildStatsLabel() {
+    const { successRate, streak } = this._calcStats();
+    return successRate + '% sucesso  |  ' + streak + ' seguidas';
+  },
+
+  // ─── Formatação ────────────────────────────────────────────
+
+  _fmtTime(ms) {
+    const total = Math.floor(ms / 1000);
+    const m = String(Math.floor(total / 60)).padStart(2, '0');
+    const s = String(total % 60).padStart(2, '0');
+    return m + ':' + s;
+  },
+
+  _fmtDuration(ms) {
+    return Math.floor(ms / 60000) + 'min';
+  },
 });
