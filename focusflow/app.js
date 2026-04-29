@@ -1,18 +1,28 @@
-import FocusPage from './page/index.page.js';
-import { StorageManager } from './utils/storage.js';
-
 App({
   globalData: {
-    storage: new StorageManager(),
-    analytics: null
+    sessions: [],
   },
 
-  async onLaunch(options) {
-    console.log('🚀 FocusFlow launched');
-    this.globalData.storage.init();
+  onCreate(options) {
+    this._loadSessions();
   },
 
-  onShow(options) {
-    new FocusPage('page');
-  }
+  onDestroy() {},
+
+  _loadSessions() {
+    try {
+      const [stat, err] = hmFS.stat('focusflow.json');
+      if (err !== 0) return;
+
+      const fd = hmFS.open('focusflow.json', hmFS.O_RDONLY);
+      const buf = new Uint8Array(stat.size);
+      hmFS.read(fd, buf.buffer, 0, stat.size);
+      hmFS.close(fd);
+
+      const text = String.fromCharCode.apply(null, buf);
+      this.globalData.sessions = JSON.parse(text);
+    } catch (e) {
+      this.globalData.sessions = [];
+    }
+  },
 });
