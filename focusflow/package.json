@@ -1,0 +1,12 @@
+{
+  "name": "focusflow",
+  "version": "2.0.0",
+  "description": "FocusFlow ZeppOS app",
+  "main": "app.js",
+  "scripts": {
+    "dev": "zpm dev",
+    "build": "zpm build"
+  },
+  "keywords": ["zepp", "focus", "timer", "bip6"],
+  "author": "BLACKBOXAI"
+}
