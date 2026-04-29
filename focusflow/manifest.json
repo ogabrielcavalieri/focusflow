@@ -1,0 +1,11 @@
+{
+  "id": "com.focusflow.timer",
+  "name": "FocusFlow",
+  "version": "2.0.0",
+  "type": "app",
+  "icon": "icon.png",
+  "pages": ["page/index.page.js"],
+  "minPlatformVersion": "6.0.0",
+  "supportDevices": [{"name": "Amazfit Bip 6", "id": "bip6"}],
+  "permissions": ["fs"]
+}
